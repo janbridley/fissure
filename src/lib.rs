@@ -275,15 +275,7 @@ fn sym_evecs_from_evals(m: &Mat3, evals: [f64; 3]) -> Mat3 {
         // Diagonal matrix: map eigenvalues to diagonal positions in descending order
         let diag = [m[0][0], m[1][1], m[2][2]];
         let mut idx = [0_usize, 1, 2];
-        if diag[idx[0]] < diag[idx[1]] {
-            idx.swap(0, 1);
-        }
-        if diag[idx[1]] < diag[idx[2]] {
-            idx.swap(1, 2);
-        }
-        if diag[idx[0]] < diag[idx[1]] {
-            idx.swap(0, 1);
-        }
+        idx.sort_unstable_by(|&a, &b| diag[b].total_cmp(&diag[a]));
         let mut result = [[0.0; 3]; 3];
         for (col, &row) in idx.iter().enumerate() {
             result[row][col] = 1.0;
@@ -291,17 +283,10 @@ fn sym_evecs_from_evals(m: &Mat3, evals: [f64; 3]) -> Mat3 {
         return result;
     }
 
-    let (evec0, evec1, evec2) = if det3(m) >= 0.0 {
-        let e0 = sym_evec0(m, evals[0]);
-        let e1 = sym_evec1(m, e0, evals[1]);
-        let e2 = cross(e1, e0);
-        (e0, e1, e2)
-    } else {
-        let e2 = sym_evec0(m, evals[2]);
-        let e1 = sym_evec1(m, e2, evals[1]);
-        let e0 = cross(e2, e1);
-        (e0, e1, e2)
-    };
+    let e0 = sym_evec0(m, evals[0]);
+    let e1 = sym_evec1(m, e0, evals[1]);
+    let e2 = cross(e1, e0);
+    let (evec0, evec1, evec2) = (e0, e1, e2);
 
     let cols = [evec0, evec1, evec2];
     std::array::from_fn(|i| std::array::from_fn(|j| cols[j][i]))
@@ -320,8 +305,7 @@ fn sym_evec0(m: &Mat3, eval0: f64) -> [f64; 3] {
         [1.0, 0.0, 0.0]
     } else {
         let best = (0..3)
-            .max_by(|&a, &b| norms_sq[a].partial_cmp(&norms_sq[b]).expect("non-negative"))
-            .expect("non-empty range");
+            .max_by(|&a, &b| norms_sq[a].total_cmp(&norms_sq[b]));
         let s = norms_sq[best].sqrt();
         crosses[best].map(|x| x / s)
     }
