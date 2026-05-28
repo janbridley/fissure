@@ -5,8 +5,8 @@ Performant and numerically robust matrix decompositions of small matrices.
 ### lasv2
 
 Faithful port of LAPACK's `DLASV2` / `SLASV2` for the singular value decomposition of
-2×2 matrices. Works with any `T: num_traits::Float` (`f32`, `f64`, SIMD, or custom float
-types).
+2×2 upper-triangular matrices. Works with any `T: num_traits::Float` (`f32`, `f64`,
+SIMD, or custom float types).
 
 Provides three entry points:
 
