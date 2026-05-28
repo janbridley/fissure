@@ -341,36 +341,18 @@ fn sym_evec1(m: &Mat3, evec0: [f64; 3], eval1: f64) -> [f64; 3] {
     let v = cross(evec0, u);
     let mu = mat3_mul_vec(m, u);
     let mv = mat3_mul_vec(m, v);
-    let m00 = dot(u, mu) - eval1;
-    let m01 = dot(u, mv);
-    let m11 = dot(v, mv) - eval1;
+    let a = dot(u, mu) - eval1;
+    let b = dot(u, mv);
+    let c = dot(v, mv) - eval1;
 
-    if m00.abs() >= m11.abs() {
-        if m00.abs().max(m01.abs()) <= 1e-20 {
-            u
-        } else if m00.abs() >= m01.abs() {
-            let m01_scaled = m01 / m00;
-            let s = (1.0 + m01_scaled * m01_scaled).sqrt();
-            let c = 1.0 / s;
-            std::array::from_fn(|k| m01_scaled * c * u[k] - c * v[k])
-        } else {
-            let m00_scaled = m00 / m01;
-            let s = (1.0 + m00_scaled * m00_scaled).sqrt();
-            let c = 1.0 / s;
-            std::array::from_fn(|k| c * u[k] - m00_scaled * c * v[k])
-        }
-    } else if m00.abs().max(m01.abs()) <= 1e-20 {
+    // Null vector of the projected 2×2 symmetric matrix [[a, b], [b, c]]
+    // Use the adjugate row with larger norm for numerical stability.
+    let (p, q) = if a.abs() >= c.abs() { (-b, a) } else { (-c, b) };
+    let n = p.hypot(q);
+    if n < 1e-20 {
         u
-    } else if m11.abs() >= m01.abs() {
-        let m01_scaled = m01 / m11;
-        let s = (1.0 + m01_scaled * m01_scaled).sqrt();
-        let c = 1.0 / s;
-        std::array::from_fn(|k| c * u[k] - m01_scaled * c * v[k])
     } else {
-        let m11_scaled = m11 / m01;
-        let s = (1.0 + m11_scaled * m11_scaled).sqrt();
-        let c = 1.0 / s;
-        std::array::from_fn(|k| m11_scaled * c * u[k] - c * v[k])
+        std::array::from_fn(|k| (p / n) * u[k] + (q / n) * v[k])
     }
 }
 
