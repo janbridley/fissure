@@ -128,39 +128,28 @@ pub fn svd3(m: Mat3) -> (Mat3, [f64; 3], Mat3) {
     let inv_scale = 1.0 / scale;
     let s: Mat3 = m.map(|row| row.map(|x| x * inv_scale));
 
-    // Characteristic polynomial coefficients of B = A^T A from invariants of A
-    let a_coeff = s.iter().flat_map(|r| r.iter()).map(|x| x * x).sum();
+    // Form B = A^T A (symmetric), then derive characteristic polynomial coefficients
+    let b00 = s[0][0] * s[0][0] + s[1][0] * s[1][0] + s[2][0] * s[2][0];
+    let b01 = s[0][0] * s[0][1] + s[1][0] * s[1][1] + s[2][0] * s[2][1];
+    let b02 = s[0][0] * s[0][2] + s[1][0] * s[1][2] + s[2][0] * s[2][2];
+    let b11 = s[0][1] * s[0][1] + s[1][1] * s[1][1] + s[2][1] * s[2][1];
+    let b12 = s[0][1] * s[0][2] + s[1][1] * s[1][2] + s[2][1] * s[2][2];
+    let b22 = s[0][2] * s[0][2] + s[1][2] * s[1][2] + s[2][2] * s[2][2];
 
-    let m00 = s[1][1] * s[2][2] - s[1][2] * s[2][1];
-    let m01 = s[1][0] * s[2][2] - s[1][2] * s[2][0];
-    let m02 = s[1][0] * s[2][1] - s[1][1] * s[2][0];
-    let m10 = s[0][1] * s[2][2] - s[0][2] * s[2][1];
-    let m11 = s[0][0] * s[2][2] - s[0][2] * s[2][0];
-    let m12 = s[0][0] * s[2][1] - s[0][1] * s[2][0];
-    let m20 = s[0][1] * s[1][2] - s[0][2] * s[1][1];
-    let m21 = s[0][0] * s[1][2] - s[0][2] * s[1][0];
-    let m22 = s[0][0] * s[1][1] - s[0][1] * s[1][0];
+    let a_coeff = b00 + b11 + b22;
 
-    let minors = [
-        [m00, m01, m02],
-        [m10, m11, m12],
-        [m20, m21, m22],
-    ];
-    let b_coeff = minors.iter().flat_map(|r| r.iter()).map(|x| x * x).sum();
-    let det_a = det3(&s);
-    let c_coeff = det_a * det_a;
+    let minor01 = b00 * b11 - b01 * b01;
+    let minor02 = b00 * b22 - b02 * b02;
+    let minor12 = b11 * b22 - b12 * b12;
+    let b_coeff = minor01 + minor02 + minor12;
+
+    let c_coeff = b00 * minor12 - b01 * (b01 * b22 - b12 * b02) + b02 * (b01 * b12 - b11 * b02);
 
     let (lambda1, lambda2, lambda3) =
         solve_characteristic_polynomial(a_coeff, b_coeff, c_coeff);
 
     // Right singular vectors from eigenvectors of B = A^T A
-    let mut b = [[0.0; 3]; 3];
-    for i in 0..3 {
-        for j in i..3 {
-            b[i][j] = (0..3).map(|k| s[k][i] * s[k][j]).sum();
-            b[j][i] = b[i][j];
-        }
-    }
+    let b: Mat3 = [[b00, b01, b02], [b01, b11, b12], [b02, b12, b22]];
 
     let mut v = sym_evecs_from_evals(&b, [lambda1, lambda2, lambda3]);
     if det3(&v) < 0.0 {
