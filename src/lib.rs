@@ -110,14 +110,12 @@ pub type Mat3 = [[f64; 3]; 3];
 /// assert!(s[0].abs() >= s[1].abs());
 /// ```
 #[inline]
-#[expect(clippy::too_many_lines, reason = "unrolled 3×3 SVD is inherently long")]
-#[expect(clippy::must_use_candidate, reason = "SVD result should always be used")]
 pub fn svd3(m: Mat3) -> (Mat3, [f64; 3], Mat3) {
-    let [[a00, a01, a02], [a10, a11, a12], [a20, a21, a22]] = m;
-    let mut scale = a00.abs();
-    scale = scale.max(a01.abs()).max(a02.abs());
-    scale = scale.max(a10.abs()).max(a11.abs()).max(a12.abs());
-    scale = scale.max(a20.abs()).max(a21.abs()).max(a22.abs());
+    let scale = m
+        .iter()
+        .flat_map(|r| r.iter())
+        .map(|x| x.abs())
+        .fold(0.0_f64, f64::max);
 
     if scale == 0.0 {
         return (
@@ -128,60 +126,41 @@ pub fn svd3(m: Mat3) -> (Mat3, [f64; 3], Mat3) {
     }
 
     let inv_scale = 1.0 / scale;
-    let s00 = a00 * inv_scale;
-    let s01 = a01 * inv_scale;
-    let s02 = a02 * inv_scale;
-    let s10 = a10 * inv_scale;
-    let s11 = a11 * inv_scale;
-    let s12 = a12 * inv_scale;
-    let s20 = a20 * inv_scale;
-    let s21 = a21 * inv_scale;
-    let s22 = a22 * inv_scale;
+    let s: Mat3 = m.map(|row| row.map(|x| x * inv_scale));
 
     // Characteristic polynomial coefficients of B = A^T A from invariants of A
-    let a_coeff = s00 * s00
-        + s01 * s01
-        + s02 * s02
-        + s10 * s10
-        + s11 * s11
-        + s12 * s12
-        + s20 * s20
-        + s21 * s21
-        + s22 * s22;
+    let a_coeff = s.iter().flat_map(|r| r.iter()).map(|x| x * x).sum();
 
-    let m00 = s11 * s22 - s12 * s21;
-    let m01 = s10 * s22 - s12 * s20;
-    let m02 = s10 * s21 - s11 * s20;
-    let m10 = s01 * s22 - s02 * s21;
-    let m11 = s00 * s22 - s02 * s20;
-    let m12 = s00 * s21 - s01 * s20;
-    let m20 = s01 * s12 - s02 * s11;
-    let m21 = s00 * s12 - s02 * s10;
-    let m22 = s00 * s11 - s01 * s10;
+    let m00 = s[1][1] * s[2][2] - s[1][2] * s[2][1];
+    let m01 = s[1][0] * s[2][2] - s[1][2] * s[2][0];
+    let m02 = s[1][0] * s[2][1] - s[1][1] * s[2][0];
+    let m10 = s[0][1] * s[2][2] - s[0][2] * s[2][1];
+    let m11 = s[0][0] * s[2][2] - s[0][2] * s[2][0];
+    let m12 = s[0][0] * s[2][1] - s[0][1] * s[2][0];
+    let m20 = s[0][1] * s[1][2] - s[0][2] * s[1][1];
+    let m21 = s[0][0] * s[1][2] - s[0][2] * s[1][0];
+    let m22 = s[0][0] * s[1][1] - s[0][1] * s[1][0];
 
-    let b_coeff = m00 * m00
-        + m01 * m01
-        + m02 * m02
-        + m10 * m10
-        + m11 * m11
-        + m12 * m12
-        + m20 * m20
-        + m21 * m21
-        + m22 * m22;
-    let det_a = s00 * m00 - s01 * m01 + s02 * m02;
+    let minors = [
+        [m00, m01, m02],
+        [m10, m11, m12],
+        [m20, m21, m22],
+    ];
+    let b_coeff = minors.iter().flat_map(|r| r.iter()).map(|x| x * x).sum();
+    let det_a = det3(&s);
     let c_coeff = det_a * det_a;
 
     let (lambda1, lambda2, lambda3) =
         solve_characteristic_polynomial(a_coeff, b_coeff, c_coeff);
 
     // Right singular vectors from eigenvectors of B = A^T A
-    let b00 = s00 * s00 + s10 * s10 + s20 * s20;
-    let b01 = s00 * s01 + s10 * s11 + s20 * s21;
-    let b02 = s00 * s02 + s10 * s12 + s20 * s22;
-    let b11 = s01 * s01 + s11 * s11 + s21 * s21;
-    let b12 = s01 * s02 + s11 * s12 + s21 * s22;
-    let b22 = s02 * s02 + s12 * s12 + s22 * s22;
-    let b: Mat3 = [[b00, b01, b02], [b01, b11, b12], [b02, b12, b22]];
+    let mut b = [[0.0; 3]; 3];
+    for i in 0..3 {
+        for j in i..3 {
+            b[i][j] = (0..3).map(|k| s[k][i] * s[k][j]).sum();
+            b[j][i] = b[i][j];
+        }
+    }
 
     let mut v = sym_evecs_from_evals(&b, [lambda1, lambda2, lambda3]);
     if det3(&v) < 0.0 {
@@ -191,15 +170,14 @@ pub fn svd3(m: Mat3) -> (Mat3, [f64; 3], Mat3) {
     }
 
     // Left singular vectors and signed singular values
-    let s_mat: Mat3 = [[s00, s01, s02], [s10, s11, s12], [s20, s21, s22]];
     let mut u_cols = [[0.0; 3]; 3];
     let mut sigmas = [0.0; 3];
     for i in 0..2 {
-        let av = mat3_mul_vec(&s_mat, [v[0][i], v[1][i], v[2][i]]);
+        let av = mat3_mul_vec(&s, [v[0][i], v[1][i], v[2][i]]);
         let s_i = (av[0] * av[0] + av[1] * av[1] + av[2] * av[2]).sqrt();
         sigmas[i] = s_i * scale;
         if s_i > 1e-10 {
-            u_cols[i] = [av[0] / s_i, av[1] / s_i, av[2] / s_i];
+            u_cols[i] = av.map(|x| x / s_i);
         } else {
             let p = if i == 1 {
                 u_cols[0]
@@ -215,18 +193,14 @@ pub fn svd3(m: Mat3) -> (Mat3, [f64; 3], Mat3) {
                 },
             );
             let n = (u_new[0] * u_new[0] + u_new[1] * u_new[1] + u_new[2] * u_new[2]).sqrt();
-            u_cols[i] = [u_new[0] / n, u_new[1] / n, u_new[2] / n];
+            u_cols[i] = u_new.map(|x| x / n);
         }
     }
     u_cols[2] = cross(u_cols[0], u_cols[1]);
-    let av2 = mat3_mul_vec(&s_mat, [v[0][2], v[1][2], v[2][2]]);
+    let av2 = mat3_mul_vec(&s, [v[0][2], v[1][2], v[2][2]]);
     sigmas[2] = dot(u_cols[2], av2) * scale;
 
-    let u: Mat3 = [
-        [u_cols[0][0], u_cols[1][0], u_cols[2][0]],
-        [u_cols[0][1], u_cols[1][1], u_cols[2][1]],
-        [u_cols[0][2], u_cols[1][2], u_cols[2][2]],
-    ];
+    let u: Mat3 = std::array::from_fn(|i| std::array::from_fn(|j| u_cols[j][i]));
 
     (u, sigmas, v)
 }
@@ -329,39 +303,27 @@ fn sym_evecs_from_evals(m: &Mat3, evals: [f64; 3]) -> Mat3 {
         (e0, e1, e2)
     };
 
-    [
-        [evec0[0], evec1[0], evec2[0]],
-        [evec0[1], evec1[1], evec2[1]],
-        [evec0[2], evec1[2], evec2[2]],
-    ]
+    let cols = [evec0, evec1, evec2];
+    std::array::from_fn(|i| std::array::from_fn(|j| cols[j][i]))
 }
 
 /// Computes the eigenvector corresponding to the first eigenvalue via adjugate cross-products.
 #[inline]
 fn sym_evec0(m: &Mat3, eval0: f64) -> [f64; 3] {
-    let row0 = [m[0][0] - eval0, m[0][1], m[0][2]];
-    let row1 = [m[1][0], m[1][1] - eval0, m[1][2]];
-    let row2 = [m[2][0], m[2][1], m[2][2] - eval0];
+    let rows: [[f64; 3]; 3] = std::array::from_fn(|i| {
+        std::array::from_fn(|j| m[i][j] - if i == j { eval0 } else { 0.0 })
+    });
+    let crosses = [cross(rows[0], rows[1]), cross(rows[0], rows[2]), cross(rows[1], rows[2])];
+    let norms_sq = crosses.map(|c| dot(c, c));
 
-    let r0xr1 = cross(row0, row1);
-    let r0xr2 = cross(row0, row2);
-    let r1xr2 = cross(row1, row2);
-
-    let d0 = dot(r0xr1, r0xr1);
-    let d1 = dot(r0xr2, r0xr2);
-    let d2 = dot(r1xr2, r1xr2);
-
-    if d0 <= 1e-20 && d1 <= 1e-20 && d2 <= 1e-20 {
+    if norms_sq.iter().all(|&d| d <= 1e-20) {
         [1.0, 0.0, 0.0]
-    } else if d0 >= d1 && d0 >= d2 {
-        let s = d0.sqrt();
-        [r0xr1[0] / s, r0xr1[1] / s, r0xr1[2] / s]
-    } else if d1 >= d0 && d1 >= d2 {
-        let s = d1.sqrt();
-        [r0xr2[0] / s, r0xr2[1] / s, r0xr2[2] / s]
     } else {
-        let s = d2.sqrt();
-        [r1xr2[0] / s, r1xr2[1] / s, r1xr2[2] / s]
+        let best = (0..3)
+            .max_by(|&a, &b| norms_sq[a].partial_cmp(&norms_sq[b]).expect("non-negative"))
+            .expect("non-empty range");
+        let s = norms_sq[best].sqrt();
+        crosses[best].map(|x| x / s)
     }
 }
 
@@ -390,20 +352,12 @@ fn sym_evec1(m: &Mat3, evec0: [f64; 3], eval1: f64) -> [f64; 3] {
             let m01_scaled = m01 / m00;
             let s = (1.0 + m01_scaled * m01_scaled).sqrt();
             let c = 1.0 / s;
-            [
-                m01_scaled * c * u[0] - c * v[0],
-                m01_scaled * c * u[1] - c * v[1],
-                m01_scaled * c * u[2] - c * v[2],
-            ]
+            std::array::from_fn(|k| m01_scaled * c * u[k] - c * v[k])
         } else {
             let m00_scaled = m00 / m01;
             let s = (1.0 + m00_scaled * m00_scaled).sqrt();
             let c = 1.0 / s;
-            [
-                c * u[0] - m00_scaled * c * v[0],
-                c * u[1] - m00_scaled * c * v[1],
-                c * u[2] - m00_scaled * c * v[2],
-            ]
+            std::array::from_fn(|k| c * u[k] - m00_scaled * c * v[k])
         }
     } else if m00.abs().max(m01.abs()) <= 1e-20 {
         u
@@ -411,20 +365,12 @@ fn sym_evec1(m: &Mat3, evec0: [f64; 3], eval1: f64) -> [f64; 3] {
         let m01_scaled = m01 / m11;
         let s = (1.0 + m01_scaled * m01_scaled).sqrt();
         let c = 1.0 / s;
-        [
-            c * u[0] - m01_scaled * c * v[0],
-            c * u[1] - m01_scaled * c * v[1],
-            c * u[2] - m01_scaled * c * v[2],
-        ]
+        std::array::from_fn(|k| c * u[k] - m01_scaled * c * v[k])
     } else {
         let m11_scaled = m11 / m01;
         let s = (1.0 + m11_scaled * m11_scaled).sqrt();
         let c = 1.0 / s;
-        [
-            m11_scaled * c * u[0] - c * v[0],
-            m11_scaled * c * u[1] - c * v[1],
-            m11_scaled * c * u[2] - c * v[2],
-        ]
+        std::array::from_fn(|k| m11_scaled * c * u[k] - c * v[k])
     }
 }
 
