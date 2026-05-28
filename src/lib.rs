@@ -12,7 +12,7 @@ SIMD, or custom float types).
 ### fissure
 
 - **[`svd2`]** — SVD of a general 2×2 matrix, accepts `[[T; 2]; 2]` row-major input.
-- **[`svd3`]** — SVD of a general 3×3 matrix, accepts `[[f64; 3]; 3]` row-major input.
+- **[`svd3`]** — SVD of a general 3×3 matrix, accepts `[[T; 3]; 3]` row-major input.
   Based on Vertechy and Parenti-Castelli (2004) with numerical enhancements.
 
 */
@@ -90,8 +90,8 @@ pub fn svd2<T: Float>(m: Mat2<T>) -> (Mat2<T>, (T, T), Mat2<T>) {
     (u_full, (ssmax, ssmin), v)
 }
 
-/// A stack-allocated 3×3 matrix of f64 values.
-pub type Mat3 = [[f64; 3]; 3];
+/// A stack-allocated 3×3 matrix of type T.
+pub type Mat3<T> = [[T; 3]; 3];
 
 /// Computes the singular value decomposition of a general 3×3 matrix.
 ///
@@ -106,27 +106,31 @@ pub type Mat3 = [[f64; 3]; 3];
 /// # Example
 /// ```rust
 /// use fissure::svd3;
-/// let (u, s, v) = svd3([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]);
+/// let (u, s, v) = svd3::<f64>([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]);
 /// assert!(s[0].abs() >= s[1].abs());
 /// ```
 #[inline]
-pub fn svd3(m: Mat3) -> (Mat3, [f64; 3], Mat3) {
+pub fn svd3<T: Float>(m: Mat3<T>) -> (Mat3<T>, [T; 3], Mat3<T>) {
+    let zero = T::zero();
+    let one = T::one();
+
     let scale = m
         .iter()
         .flat_map(|r| r.iter())
         .map(|x| x.abs())
-        .fold(0.0_f64, f64::max);
+        .fold(zero, T::max);
 
-    if scale == 0.0 {
-        return (
-            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
-            [0.0; 3],
-            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
-        );
+    if scale == zero {
+        let ident: Mat3<T> = [
+            [one, zero, zero],
+            [zero, one, zero],
+            [zero, zero, one],
+        ];
+        return (ident, [zero; 3], ident);
     }
 
-    let inv_scale = 1.0 / scale;
-    let s: Mat3 = m.map(|row| row.map(|x| x * inv_scale));
+    let inv_scale = one / scale;
+    let s: Mat3<T> = m.map(|row| row.map(|x| x * inv_scale));
 
     // Form B = A^T A (symmetric), then derive characteristic polynomial coefficients
     let b00 = s[0][0] * s[0][0] + s[1][0] * s[1][0] + s[2][0] * s[2][0];
@@ -149,41 +153,51 @@ pub fn svd3(m: Mat3) -> (Mat3, [f64; 3], Mat3) {
         solve_characteristic_polynomial(a_coeff, b_coeff, c_coeff);
 
     // Right singular vectors from eigenvectors of B = A^T A
-    let b: Mat3 = [[b00, b01, b02], [b01, b11, b12], [b02, b12, b22]];
+    let b: Mat3<T> = [[b00, b01, b02], [b01, b11, b12], [b02, b12, b22]];
 
     let mut v = sym_evecs_from_evals(&b, [lambda1, lambda2, lambda3]);
-    if det3(&v) < 0.0 {
+    if det3(&v) < zero {
         for row in &mut v {
             row[2] = -row[2];
         }
     }
 
     // Left singular vectors and signed singular values
-    let av: [[f64; 3]; 3] = std::array::from_fn(|i| mat3_mul_vec(&s, [v[0][i], v[1][i], v[2][i]]));
+    let av: [[T; 3]; 3] =
+        std::array::from_fn(|i| mat3_mul_vec(&s, [v[0][i], v[1][i], v[2][i]]));
 
+    let tol = T::epsilon().sqrt();
     let s0 = dot(av[0], av[0]).sqrt();
-    let u0 = if s0 > 1e-10 { av[0].map(|x| x / s0) } else { [1.0, 0.0, 0.0] };
+    let u0 = if s0 > tol {
+        av[0].map(|x| x / s0)
+    } else {
+        [one, zero, zero]
+    };
 
     let s1 = dot(av[1], av[1]).sqrt();
-    let u1 = if s1 > 1e-10 { av[1].map(|x| x / s1) } else { perp(u0) };
+    let u1 = if s1 > tol {
+        av[1].map(|x| x / s1)
+    } else {
+        perp(u0)
+    };
 
     let u2 = cross(u0, u1);
     let sigmas = [s0 * scale, s1 * scale, dot(u2, av[2]) * scale];
 
-    let u: Mat3 = std::array::from_fn(|i| std::array::from_fn(|j| [u0, u1, u2][j][i]));
+    let u: Mat3<T> = std::array::from_fn(|i| std::array::from_fn(|j| [u0, u1, u2][j][i]));
 
     (u, sigmas, v)
 }
 
 /// Computes the dot product of two 3D vectors.
 #[inline]
-fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
+fn dot<T: Float>(a: [T; 3], b: [T; 3]) -> T {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
 /// Computes the cross product of two 3D vectors.
 #[inline]
-fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+fn cross<T: Float>(a: [T; 3], b: [T; 3]) -> [T; 3] {
     [
         a[1] * b[2] - a[2] * b[1],
         a[2] * b[0] - a[0] * b[2],
@@ -193,11 +207,12 @@ fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
 
 /// Returns a unit vector perpendicular to `v`.
 #[inline]
-fn perp(v: [f64; 3]) -> [f64; 3] {
+fn perp<T: Float>(v: [T; 3]) -> [T; 3] {
+    let zero = T::zero();
     let raw = if v[0].abs() > v[1].abs() {
-        [-v[2], 0.0, v[0]]
+        [-v[2], zero, v[0]]
     } else {
-        [0.0, v[2], -v[1]]
+        [zero, v[2], -v[1]]
     };
     let n = dot(raw, raw).sqrt();
     raw.map(|x| x / n)
@@ -205,13 +220,13 @@ fn perp(v: [f64; 3]) -> [f64; 3] {
 
 /// Multiplies a 3×3 matrix by a 3D vector.
 #[inline]
-fn mat3_mul_vec(m: &Mat3, v: [f64; 3]) -> [f64; 3] {
+fn mat3_mul_vec<T: Float>(m: &Mat3<T>, v: [T; 3]) -> [T; 3] {
     [dot(m[0], v), dot(m[1], v), dot(m[2], v)]
 }
 
 /// Computes the determinant of a 3×3 matrix.
 #[inline]
-fn det3(m: &Mat3) -> f64 {
+fn det3<T: Float>(m: &Mat3<T>) -> T {
     m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
         - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
         + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
@@ -220,47 +235,57 @@ fn det3(m: &Mat3) -> f64 {
 /// Solves the characteristic polynomial λ³ − a·λ² + b·λ − c = 0
 /// using Viète's trigonometric method for the depressed cubic.
 #[inline]
-fn solve_characteristic_polynomial(
-    a_coeff: f64,
-    b_coeff: f64,
-    c_coeff: f64,
-) -> (f64, f64, f64) {
-    let a3 = a_coeff / 3.0;
-    let p = b_coeff - a_coeff * a3;
-    let q = -2.0 * a3 * a3 * a3 + a3 * b_coeff - c_coeff;
+fn solve_characteristic_polynomial<T: Float>(
+    a_coeff: T,
+    b_coeff: T,
+    c_coeff: T,
+) -> (T, T, T) {
+    let one = T::one();
+    let two = one + one;
+    let three = two + one;
+    let half = one / two;
+    let neg_half = -half;
 
-    if p >= 0.0 {
+    let a3 = a_coeff / three;
+    let p = b_coeff - a_coeff * a3;
+    let q = -two * a3 * a3 * a3 + a3 * b_coeff - c_coeff;
+
+    if p >= T::zero() {
         return (a3, a3, a3);
     }
 
-    let s = (-p / 3.0).sqrt();
-    let arg = (-q / (2.0 * s * s * s)).clamp(-1.0, 1.0);
-    let theta = arg.acos() / 3.0;
-    let m = 2.0 * s;
+    let s = (-p / three).sqrt();
+    let arg = (-q / (two * s * s * s)).max(-one).min(one);
+    let theta = arg.acos() / three;
+    let m = two * s;
 
     let cos_t = theta.cos();
     let sin_t = theta.sin();
-    let sqrt3_half = 0.5 * 3.0_f64.sqrt();
+    let sqrt3_half = half * three.sqrt();
 
     let l0 = a3 + m * cos_t;
-    let l1 = a3 + m * (cos_t * (-0.5) + sqrt3_half * sin_t);
-    let l2 = a3 + m * (cos_t * (-0.5) - sqrt3_half * sin_t);
+    let l1 = a3 + m * (cos_t * neg_half + sqrt3_half * sin_t);
+    let l2 = a3 + m * (cos_t * neg_half - sqrt3_half * sin_t);
 
     (l0, l1, l2)
 }
 
 /// Extracts eigenvectors of a symmetric 3×3 matrix from known eigenvalues.
 #[inline]
-fn sym_evecs_from_evals(m: &Mat3, evals: [f64; 3]) -> Mat3 {
+fn sym_evecs_from_evals<T: Float>(m: &Mat3<T>, evals: [T; 3]) -> Mat3<T> {
     let off_diag = m[0][1] * m[0][1] + m[0][2] * m[0][2] + m[1][2] * m[1][2];
-    if off_diag <= 1e-20 {
+    if off_diag <= T::epsilon() {
         // Diagonal matrix: map eigenvalues to diagonal positions in descending order
         let diag = [m[0][0], m[1][1], m[2][2]];
         let mut idx = [0_usize, 1, 2];
-        idx.sort_unstable_by(|&a, &b| diag[b].total_cmp(&diag[a]));
-        let mut result = [[0.0; 3]; 3];
+        idx.sort_unstable_by(|&a, &b| {
+            diag[b]
+                .partial_cmp(&diag[a])
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let mut result = [[T::zero(); 3]; 3];
         for (col, &row) in idx.iter().enumerate() {
-            result[row][col] = 1.0;
+            result[row][col] = T::one();
         }
         return result;
     }
@@ -276,18 +301,26 @@ fn sym_evecs_from_evals(m: &Mat3, evals: [f64; 3]) -> Mat3 {
 
 /// Computes the eigenvector corresponding to the first eigenvalue via adjugate cross-products.
 #[inline]
-fn sym_evec0(m: &Mat3, eval0: f64) -> [f64; 3] {
-    let rows: [[f64; 3]; 3] = std::array::from_fn(|i| {
-        std::array::from_fn(|j| m[i][j] - if i == j { eval0 } else { 0.0 })
+fn sym_evec0<T: Float>(m: &Mat3<T>, eval0: T) -> [T; 3] {
+    let rows: [[T; 3]; 3] = std::array::from_fn(|i| {
+        std::array::from_fn(|j| m[i][j] - if i == j { eval0 } else { T::zero() })
     });
-    let crosses = [cross(rows[0], rows[1]), cross(rows[0], rows[2]), cross(rows[1], rows[2])];
+    let crosses = [
+        cross(rows[0], rows[1]),
+        cross(rows[0], rows[2]),
+        cross(rows[1], rows[2]),
+    ];
     let norms_sq = crosses.map(|c| dot(c, c));
 
-    if norms_sq.iter().all(|&d| d <= 1e-20) {
-        [1.0, 0.0, 0.0]
+    if norms_sq.iter().all(|&d| d <= T::epsilon()) {
+        [T::one(), T::zero(), T::zero()]
     } else {
         let best = (0..3)
-            .max_by(|&a, &b| norms_sq[a].total_cmp(&norms_sq[b]))
+            .max_by(|&a, &b| {
+                norms_sq[a]
+                    .partial_cmp(&norms_sq[b])
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .expect("non-empty range");
         let s = norms_sq[best].sqrt();
         crosses[best].map(|x| x / s)
@@ -297,7 +330,7 @@ fn sym_evec0(m: &Mat3, eval0: f64) -> [f64; 3] {
 /// Computes the eigenvector corresponding to the second eigenvalue in the plane
 /// orthogonal to the first eigenvector.
 #[inline]
-fn sym_evec1(m: &Mat3, evec0: [f64; 3], eval1: f64) -> [f64; 3] {
+fn sym_evec1<T: Float>(m: &Mat3<T>, evec0: [T; 3], eval1: T) -> [T; 3] {
     let u = perp(evec0);
     let v = cross(evec0, u);
     let mu = mat3_mul_vec(m, u);
@@ -310,7 +343,7 @@ fn sym_evec1(m: &Mat3, evec0: [f64; 3], eval1: f64) -> [f64; 3] {
     // Use the adjugate row with larger norm for numerical stability.
     let (p, q) = if a.abs() >= c.abs() { (-b, a) } else { (-c, b) };
     let n = p.hypot(q);
-    if n < 1e-20 {
+    if n < T::epsilon() {
         u
     } else {
         std::array::from_fn(|k| (p / n) * u[k] + (q / n) * v[k])
@@ -324,7 +357,6 @@ mod tests {
     use rstest::rstest;
 
     #[expect(clippy::missing_docs_in_private_items, reason = "test helper")]
-    #[expect(clippy::unwrap_used, reason = "test helper")]
     struct SvdMetrics {
         sv_err: f64,
         recon_err: f64,
@@ -332,7 +364,7 @@ mod tests {
     }
 
     #[expect(clippy::missing_docs_in_private_items, reason = "test helper")]
-    fn measure_svd3(m: Mat3) -> SvdMetrics {
+    fn measure_svd3(m: Mat3<f64>) -> SvdMetrics {
         let (u, s, v) = svd3(m);
 
         let faer_svd = faer::mat![
@@ -406,19 +438,20 @@ mod tests {
         let mut recon_errs: Vec<f64> = Vec::new();
         let mut ortho_errs: Vec<f64> = Vec::new();
 
-        let record = |m: Mat3, sv: &mut Vec<f64>, rc: &mut Vec<f64>, or: &mut Vec<f64>| {
-            let metrics = measure_svd3(m);
-            sv.push(metrics.sv_err);
-            rc.push(metrics.recon_err);
-            or.push(metrics.ortho_err);
-        };
+        let record =
+            |m: Mat3<f64>, sv: &mut Vec<f64>, rc: &mut Vec<f64>, or: &mut Vec<f64>| {
+                let metrics = measure_svd3(m);
+                sv.push(metrics.sv_err);
+                rc.push(metrics.recon_err);
+                or.push(metrics.ortho_err);
+            };
 
         // Battery 1: random matrices at various scales
         let scales: &[f64] = &[1.0, 1e3, 1e6, 1e-3, 1e-6, 1e15, 1e-15];
         for &scale in scales {
             let range = Uniform::new(-scale, scale).unwrap();
             for _ in 0..1500 {
-                let m: Mat3 = [
+                let m: Mat3<f64> = [
                     [
                         rng.sample(range),
                         rng.sample(range),
@@ -440,7 +473,7 @@ mod tests {
         }
 
         // Battery 2: adversarial / degenerate matrices
-        let adversarial: Vec<Mat3> = vec![
+        let adversarial: Vec<Mat3<f64>> = vec![
             // Identity and scalar multiples (all-equal singular values → p ≈ 0)
             [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
             [[100.0, 0.0, 0.0], [0.0, 100.0, 0.0], [0.0, 0.0, 100.0]],
@@ -602,7 +635,7 @@ mod tests {
         [SMALL_F64, SMALL_F64, SMALL_F64],
         [SMALL_F64, SMALL_F64, SMALL_F64]
     ])]
-    fn test_svd3(#[case] m: Mat3) {
+    fn test_svd3(#[case] m: Mat3<f64>) {
         let (u, s, v) = svd3(m);
 
         // Singular values in descending order by absolute value
