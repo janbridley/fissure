@@ -170,37 +170,18 @@ pub fn svd3(m: Mat3) -> (Mat3, [f64; 3], Mat3) {
     }
 
     // Left singular vectors and signed singular values
-    let mut u_cols = [[0.0; 3]; 3];
-    let mut sigmas = [0.0; 3];
-    for i in 0..2 {
-        let av = mat3_mul_vec(&s, [v[0][i], v[1][i], v[2][i]]);
-        let s_i = (av[0] * av[0] + av[1] * av[1] + av[2] * av[2]).sqrt();
-        sigmas[i] = s_i * scale;
-        if s_i > 1e-10 {
-            u_cols[i] = av.map(|x| x / s_i);
-        } else {
-            let p = if i == 1 {
-                u_cols[0]
-            } else {
-                [1.0, 0.0, 0.0]
-            };
-            let u_new = cross(
-                p,
-                if p[0].abs() < 0.8 {
-                    [1.0, 0.0, 0.0]
-                } else {
-                    [0.0, 1.0, 0.0]
-                },
-            );
-            let n = (u_new[0] * u_new[0] + u_new[1] * u_new[1] + u_new[2] * u_new[2]).sqrt();
-            u_cols[i] = u_new.map(|x| x / n);
-        }
-    }
-    u_cols[2] = cross(u_cols[0], u_cols[1]);
-    let av2 = mat3_mul_vec(&s, [v[0][2], v[1][2], v[2][2]]);
-    sigmas[2] = dot(u_cols[2], av2) * scale;
+    let av: [[f64; 3]; 3] = std::array::from_fn(|i| mat3_mul_vec(&s, [v[0][i], v[1][i], v[2][i]]));
 
-    let u: Mat3 = std::array::from_fn(|i| std::array::from_fn(|j| u_cols[j][i]));
+    let s0 = dot(av[0], av[0]).sqrt();
+    let u0 = if s0 > 1e-10 { av[0].map(|x| x / s0) } else { [1.0, 0.0, 0.0] };
+
+    let s1 = dot(av[1], av[1]).sqrt();
+    let u1 = if s1 > 1e-10 { av[1].map(|x| x / s1) } else { perp(u0) };
+
+    let u2 = cross(u0, u1);
+    let sigmas = [s0 * scale, s1 * scale, dot(u2, av[2]) * scale];
+
+    let u: Mat3 = std::array::from_fn(|i| std::array::from_fn(|j| [u0, u1, u2][j][i]));
 
     (u, sigmas, v)
 }
@@ -219,6 +200,18 @@ fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
         a[2] * b[0] - a[0] * b[2],
         a[0] * b[1] - a[1] * b[0],
     ]
+}
+
+/// Returns a unit vector perpendicular to `v`.
+#[inline]
+fn perp(v: [f64; 3]) -> [f64; 3] {
+    let raw = if v[0].abs() > v[1].abs() {
+        [-v[2], 0.0, v[0]]
+    } else {
+        [0.0, v[2], -v[1]]
+    };
+    let n = dot(raw, raw).sqrt();
+    raw.map(|x| x / n)
 }
 
 /// Multiplies a 3×3 matrix by a 3D vector.
@@ -316,13 +309,7 @@ fn sym_evec0(m: &Mat3, eval0: f64) -> [f64; 3] {
 /// orthogonal to the first eigenvector.
 #[inline]
 fn sym_evec1(m: &Mat3, evec0: [f64; 3], eval1: f64) -> [f64; 3] {
-    let u = if evec0[0].abs() > evec0[1].abs() {
-        let s = (evec0[0] * evec0[0] + evec0[2] * evec0[2]).sqrt();
-        [-evec0[2] / s, 0.0, evec0[0] / s]
-    } else {
-        let s = (evec0[1] * evec0[1] + evec0[2] * evec0[2]).sqrt();
-        [0.0, evec0[2] / s, -evec0[1] / s]
-    };
+    let u = perp(evec0);
     let v = cross(evec0, u);
     let mu = mat3_mul_vec(m, u);
     let mv = mat3_mul_vec(m, v);
