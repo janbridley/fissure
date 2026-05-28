@@ -12,3 +12,6 @@ num-traits = "0.2.19"
 approx = "0.5.1"
 faer = "0.22.6"
 rstest = "0.26.1"
+
+[lints]
+workspace = true
