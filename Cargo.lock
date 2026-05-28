@@ -325,6 +325,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ced73b1dacfc750a6db6c0a0c3a3853c8b41997e2e2c563dc90804ae6867959"
 
 [[package]]
+name = "fissure"
+version = "0.1.0"
+dependencies = [
+ "approx",
+ "faer",
+ "lasv2",
+ "num-traits",
+ "rstest",
+]
+
+[[package]]
 name = "futures-core"
 version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -583,14 +594,6 @@ dependencies = [
  "quote",
  "syn 1.0.109",
 ]
-
-[[package]]
-name = "laev2"
-version = "0.1.0"
-
-[[package]]
-name = "lags2"
-version = "0.1.0"
 
 [[package]]
 name = "lasv2"

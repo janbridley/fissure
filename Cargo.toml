@@ -1,3 +1,19 @@
+[package]
+name = "fissure"
+version = "0.1.0"
+edition = "2024"
+license-file = "LICENSE"
+description = "Performant and numerically robust matrix decompositions of small matrices."
+
+[dependencies]
+lasv2 = { path = "lasv2" }
+num-traits = "0.2.19"
+
+[dev-dependencies]
+approx = "0.5.1"
+faer = "0.22.6"
+rstest = "0.26.1"
+
 [workspace]
 resolver = "2"
-members = ["lasv2", "lags2", "laev2"]
+members = ["lasv2"]
