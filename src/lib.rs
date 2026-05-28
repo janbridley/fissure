@@ -305,7 +305,8 @@ fn sym_evec0(m: &Mat3, eval0: f64) -> [f64; 3] {
         [1.0, 0.0, 0.0]
     } else {
         let best = (0..3)
-            .max_by(|&a, &b| norms_sq[a].total_cmp(&norms_sq[b]));
+            .max_by(|&a, &b| norms_sq[a].total_cmp(&norms_sq[b]))
+            .expect("non-empty range");
         let s = norms_sq[best].sqrt();
         crosses[best].map(|x| x / s)
     }
