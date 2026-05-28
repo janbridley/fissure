@@ -21,7 +21,7 @@ fn random_mat2(rng: &mut StdRng) -> Mat2<f64> {
     ]
 }
 
-fn random_mat3(rng: &mut StdRng) -> Mat3 {
+fn random_mat3(rng: &mut StdRng) -> Mat3<f64> {
     let range = Uniform::new(-100.0, 100.0).unwrap();
     [
         [rng.sample(range), rng.sample(range), rng.sample(range)],
@@ -47,7 +47,7 @@ fn svd2_polynomial(m: Mat2<f64>) -> [f64; 2] {
 /// Closed-form 3×3 singular values via Cardano's formula on A^T A.
 /// Numerically unstable (condition-number squaring + casus irreducibilis) but
 /// serves as a speed baseline.
-fn svd3_polynomial(m: Mat3) -> [f64; 3] {
+fn svd3_polynomial(m: Mat3<f64>) -> [f64; 3] {
     let [[a00, a01, a02], [a10, a11, a12], [a20, a21, a22]] = m;
 
     // B = A^T A (symmetric)
