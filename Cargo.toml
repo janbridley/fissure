@@ -15,7 +15,7 @@ num-traits = "0.2.19"
 [dev-dependencies]
 approx = "0.5.1"
 divan = "0.1.21"
-faer = "0.22.6"
+faer = "0.24.0"
 rand = { version = "0.10.0", default-features = false, features = ["std", "std_rng"] }
 rstest = "0.26.1"
 
