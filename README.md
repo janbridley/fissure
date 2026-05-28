@@ -12,6 +12,20 @@ SIMD, or custom float types).
 - **`svd2`** — SVD of a general 2×2 matrix, accepts `[[T; 2]; 2]` row-major input.
 
 ```rust
-use fissure::svd2;
-let (u, (smax, smin), v) = svd2([[1.0_f64, 2.0], [3.0, 4.0]]);
+use lasv2::lasv2;
+
+// Decompose the upper-triangular matrix:
+// [ 3  5 ]
+// [ 0  4 ]
+let f = 3.0_f64;
+let g = 5.0;
+let h = 4.0;
+let (mut ssmin, mut ssmax, mut snr, mut csr, mut snl, mut csl) =
+    (0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+
+lasv2(&f, &g, &h, &mut ssmin, &mut ssmax, &mut snr, &mut csr, &mut snl, &mut csl);
+
+// Produces:
+//   U = [ csl -snl ]   Σ = [ ssmax  0    ]   V = [ csr -snr ]
+//       [ snl  csl ]       [ 0      ssmin ]       [ snr  csr ]
 ```
