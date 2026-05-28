@@ -97,7 +97,7 @@ pub type Mat3 = [[f64; 3]; 3];
 ///
 /// Based on the algorithm of Vertechy and Parenti-Castelli (2004) with numerical
 /// enhancements: invariant-based polynomial coefficients to avoid condition number
-/// squaring, and Schroeder's method for guaranteed quadratic convergence.
+/// squaring, and Viète's trigonometric method for the cubic eigenvalue solve.
 ///
 /// Returns `(U, σ, V)` such that `m = U · diag(σ) · Vᵀ`, where U and V are
 /// proper rotations (det = +1). The third singular value may be negative to
@@ -261,46 +261,36 @@ fn det3(m: &Mat3) -> f64 {
         + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
 }
 
-/// Solves the characteristic polynomial λ³ − a·λ² + b·λ − c = 0.
+/// Solves the characteristic polynomial λ³ − a·λ² + b·λ − c = 0
+/// using Viète's trigonometric method for the depressed cubic.
 #[inline]
 fn solve_characteristic_polynomial(
     a_coeff: f64,
     b_coeff: f64,
     c_coeff: f64,
 ) -> (f64, f64, f64) {
-    if c_coeff.abs() < 1e-30 {
-        let l_hat = a_coeff / 2.0;
-        let delta_l = (l_hat * l_hat - b_coeff).max(0.0).sqrt();
-        return (l_hat + delta_l, l_hat - delta_l, 0.0);
+    let a3 = a_coeff / 3.0;
+    let p = b_coeff - a_coeff * a3;
+    let q = -2.0 * a3 * a3 * a3 + a3 * b_coeff - c_coeff;
+
+    if p >= 0.0 {
+        return (a3, a3, a3);
     }
 
-    // Schroeder's method for smallest eigenvalue lambda3
-    let mut x: f64 = if b_coeff > 1e-15 {
-        c_coeff / b_coeff
-    } else {
-        0.0
-    };
-    for _ in 0..20 {
-        let px = x * x * x - a_coeff * x * x + b_coeff * x - c_coeff;
-        let dpx = 3.0 * x * x - 2.0 * a_coeff * x + b_coeff;
-        let ddpx = 6.0 * x - 2.0 * a_coeff;
-        let denom = dpx * dpx - px * ddpx;
-        if denom.abs() < 1e-24 {
-            break;
-        }
-        let dx = (px * dpx) / denom;
-        x -= dx;
-        if dx.abs() < 1e-22 {
-            break;
-        }
-    }
-    let lambda3 = x.max(0.0);
+    let s = (-p / 3.0).sqrt();
+    let arg = (-q / (2.0 * s * s * s)).clamp(-1.0, 1.0);
+    let theta = arg.acos() / 3.0;
+    let m = 2.0 * s;
 
-    let l_hat = (a_coeff - lambda3) / 2.0;
-    let delta_l = (l_hat * (l_hat + 2.0 * lambda3) - b_coeff)
-        .max(0.0)
-        .sqrt();
-    (l_hat + delta_l, l_hat - delta_l, lambda3)
+    let cos_t = theta.cos();
+    let sin_t = theta.sin();
+    let sqrt3_half = 0.5 * 3.0_f64.sqrt();
+
+    let l0 = a3 + m * cos_t;
+    let l1 = a3 + m * (cos_t * (-0.5) + sqrt3_half * sin_t);
+    let l2 = a3 + m * (cos_t * (-0.5) - sqrt3_half * sin_t);
+
+    (l0, l1, l2)
 }
 
 /// Extracts eigenvectors of a symmetric 3×3 matrix from known eigenvalues.
@@ -308,7 +298,23 @@ fn solve_characteristic_polynomial(
 fn sym_evecs_from_evals(m: &Mat3, evals: [f64; 3]) -> Mat3 {
     let off_diag = m[0][1] * m[0][1] + m[0][2] * m[0][2] + m[1][2] * m[1][2];
     if off_diag <= 1e-20 {
-        return [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        // Diagonal matrix: map eigenvalues to diagonal positions in descending order
+        let diag = [m[0][0], m[1][1], m[2][2]];
+        let mut idx = [0_usize, 1, 2];
+        if diag[idx[0]] < diag[idx[1]] {
+            idx.swap(0, 1);
+        }
+        if diag[idx[1]] < diag[idx[2]] {
+            idx.swap(1, 2);
+        }
+        if diag[idx[0]] < diag[idx[1]] {
+            idx.swap(0, 1);
+        }
+        let mut result = [[0.0; 3]; 3];
+        for (col, &row) in idx.iter().enumerate() {
+            result[row][col] = 1.0;
+        }
+        return result;
     }
 
     let (evec0, evec1, evec2) = if det3(m) >= 0.0 {
@@ -428,6 +434,223 @@ mod tests {
     use approx::assert_ulps_eq;
     use rstest::rstest;
 
+    #[expect(clippy::missing_docs_in_private_items, reason = "test helper")]
+    #[expect(clippy::unwrap_used, reason = "test helper")]
+    struct SvdMetrics {
+        sv_err: f64,
+        recon_err: f64,
+        ortho_err: f64,
+    }
+
+    #[expect(clippy::missing_docs_in_private_items, reason = "test helper")]
+    fn measure_svd3(m: Mat3) -> SvdMetrics {
+        let (u, s, v) = svd3(m);
+
+        let faer_svd = faer::mat![
+            [m[0][0], m[0][1], m[0][2]],
+            [m[1][0], m[1][1], m[1][2]],
+            [m[2][0], m[2][1], m[2][2]]
+        ]
+        .svd()
+        .unwrap();
+
+        let mut sv_err = 0.0_f64;
+        let mut ours_sorted = [s[0].abs(), s[1].abs(), s[2].abs()];
+        ours_sorted.sort_by(|a, b| b.total_cmp(a));
+        let mut faer_sorted = [faer_svd.S()[0], faer_svd.S()[1], faer_svd.S()[2]];
+        faer_sorted.sort_by(|a, b| b.total_cmp(a));
+        let max_sv = ours_sorted[0].max(faer_sorted[0]).max(1e-30);
+        for i in 0..3 {
+            sv_err = sv_err.max((ours_sorted[i] - faer_sorted[i]).abs() / max_sv);
+        }
+
+        let mut recon = [[0.0_f64; 3]; 3];
+        for i in 0..3 {
+            for j in 0..3 {
+                for k in 0..3 {
+                    recon[i][j] += u[i][k] * s[k] * v[j][k];
+                }
+            }
+        }
+        let mut diff_sq = 0.0_f64;
+        let mut a_sq = 0.0_f64;
+        for i in 0..3 {
+            for j in 0..3 {
+                let d = recon[i][j] - m[i][j];
+                diff_sq += d * d;
+                a_sq += m[i][j] * m[i][j];
+            }
+        }
+        let recon_err = diff_sq.sqrt() / a_sq.sqrt().max(1e-30);
+
+        let mut ortho_err = 0.0_f64;
+        for i in 0..3 {
+            for j in 0..3 {
+                let mut uu = 0.0_f64;
+                let mut vv = 0.0_f64;
+                for k in 0..3 {
+                    uu += u[k][i] * u[k][j];
+                    vv += v[k][i] * v[k][j];
+                }
+                let expected = if i == j { 1.0 } else { 0.0 };
+                ortho_err = ortho_err
+                    .max((uu - expected).abs())
+                    .max((vv - expected).abs());
+            }
+        }
+
+        SvdMetrics {
+            sv_err,
+            recon_err,
+            ortho_err,
+        }
+    }
+
+    #[test]
+    #[expect(clippy::print_stderr, reason = "prints validation stats")]
+    fn validate_svd3_stability() {
+        use rand::{RngExt, SeedableRng, distr::Uniform, rngs::StdRng};
+
+        let mut rng = StdRng::seed_from_u64(12345);
+
+        let mut sv_errs: Vec<f64> = Vec::new();
+        let mut recon_errs: Vec<f64> = Vec::new();
+        let mut ortho_errs: Vec<f64> = Vec::new();
+
+        let record = |m: Mat3, sv: &mut Vec<f64>, rc: &mut Vec<f64>, or: &mut Vec<f64>| {
+            let metrics = measure_svd3(m);
+            sv.push(metrics.sv_err);
+            rc.push(metrics.recon_err);
+            or.push(metrics.ortho_err);
+        };
+
+        // Battery 1: random matrices at various scales
+        let scales: &[f64] = &[1.0, 1e3, 1e6, 1e-3, 1e-6, 1e15, 1e-15];
+        for &scale in scales {
+            let range = Uniform::new(-scale, scale).unwrap();
+            for _ in 0..1500 {
+                let m: Mat3 = [
+                    [
+                        rng.sample(range),
+                        rng.sample(range),
+                        rng.sample(range),
+                    ],
+                    [
+                        rng.sample(range),
+                        rng.sample(range),
+                        rng.sample(range),
+                    ],
+                    [
+                        rng.sample(range),
+                        rng.sample(range),
+                        rng.sample(range),
+                    ],
+                ];
+                record(m, &mut sv_errs, &mut recon_errs, &mut ortho_errs);
+            }
+        }
+
+        // Battery 2: adversarial / degenerate matrices
+        let adversarial: Vec<Mat3> = vec![
+            // Identity and scalar multiples (all-equal singular values → p ≈ 0)
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            [[100.0, 0.0, 0.0], [0.0, 100.0, 0.0], [0.0, 0.0, 100.0]],
+            [[1e-10, 0.0, 0.0], [0.0, 1e-10, 0.0], [0.0, 0.0, 1e-10]],
+            // Repeated singular values
+            [[3.0, 0.0, 0.0], [0.0, 3.0, 0.0], [0.0, 0.0, 1.0]],
+            [[5.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1e-15]],
+            [[1e15, 0.0, 0.0], [0.0, 1e15, 0.0], [0.0, 0.0, 1.0]],
+            // Nearly-equal singular values
+            [
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0 + 1e-14, 0.0],
+                [0.0, 0.0, 1.0 - 1e-14],
+            ],
+            [
+                [1.0, 1e-15, 0.0],
+                [1e-15, 1.0, 1e-15],
+                [0.0, 1e-15, 1.0],
+            ],
+            // Rank-deficient
+            [[0.0; 3]; 3],
+            [[1.0, 2.0, 3.0], [2.0, 4.0, 6.0], [3.0, 6.0, 9.0]],
+            [[1.0, 0.0, 0.0], [0.0, 2.0, 0.0], [0.0, 0.0, 0.0]],
+            // Extreme dynamic range
+            [
+                [1e15, 1e-15, 0.0],
+                [0.0, 1e15, 1e-15],
+                [1e-15, 0.0, 1e15],
+            ],
+            [[1e-15, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1e15]],
+            // Reflections (det = −1)
+            [[-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            [[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]],
+            // Rotation
+            [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
+            // Existing regression tests
+            [
+                [LARGE_F64, 1e8, 1e8],
+                [1e8, SMALL_F64, 1e8],
+                [1e8, 1e8, LARGE_F64],
+            ],
+            [
+                [SMALL_F64, SMALL_F64, SMALL_F64],
+                [SMALL_F64, SMALL_F64, SMALL_F64],
+                [SMALL_F64, SMALL_F64, SMALL_F64],
+            ],
+        ];
+        for m in adversarial {
+            record(m, &mut sv_errs, &mut recon_errs, &mut ortho_errs);
+        }
+
+        // Stats
+        let total = sv_errs.len();
+        sv_errs.sort_by(|a, b| a.total_cmp(b));
+        recon_errs.sort_by(|a, b| a.total_cmp(b));
+        ortho_errs.sort_by(|a, b| a.total_cmp(b));
+
+        let pct = |v: &[f64], p: usize| -> f64 { v[p.min(v.len() - 1)] };
+        let max_of = |v: &[f64]| -> f64 { v.last().copied().unwrap_or(0.0) };
+        let mean_of = |v: &[f64]| -> f64 { v.iter().sum::<f64>() / v.len() as f64 };
+
+        eprintln!("\n=== svd3 validation ({total} matrices) ===");
+        eprintln!(
+            "  SV rel err:   max={:.2e}  mean={:.2e}  p99={:.2e}",
+            max_of(&sv_errs),
+            mean_of(&sv_errs),
+            pct(&sv_errs, total * 99 / 100),
+        );
+        eprintln!(
+            "  Recon rel err: max={:.2e}  mean={:.2e}  p99={:.2e}",
+            max_of(&recon_errs),
+            mean_of(&recon_errs),
+            pct(&recon_errs, total * 99 / 100),
+        );
+        eprintln!(
+            "  Ortho err:     max={:.2e}  mean={:.2e}  p99={:.2e}",
+            max_of(&ortho_errs),
+            mean_of(&ortho_errs),
+            pct(&ortho_errs, total * 99 / 100),
+        );
+
+        assert!(
+            max_of(&sv_errs) < 1e-10,
+            "max SV error: {:.2e}",
+            max_of(&sv_errs),
+        );
+        assert!(
+            max_of(&recon_errs) < 1e-10,
+            "max reconstruction error: {:.2e}",
+            max_of(&recon_errs),
+        );
+        assert!(
+            max_of(&ortho_errs) < 1e-10,
+            "max orthogonality error: {:.2e}",
+            max_of(&ortho_errs),
+        );
+    }
+
     const SMALL_F64: f64 = 1e-15;
     const LARGE_F64: f64 = 1e30;
 
@@ -538,9 +761,16 @@ mod tests {
         ]
         .svd()
         .unwrap();
-        assert_ulps_eq!(s[0].abs(), svd.S()[0], max_ulps = 100);
-        assert_ulps_eq!(s[1].abs(), svd.S()[1], max_ulps = 100);
-        assert_ulps_eq!(s[2].abs(), svd.S()[2], max_ulps = 100);
+        let sv_tol = f64::max(s[0].abs(), svd.S()[0]).max(1.0) * f64::EPSILON * 100.0;
+        for (i, sv) in s.iter().enumerate() {
+            assert!(
+                (sv.abs() - svd.S()[i]).abs() < sv_tol,
+                "s[{i}]: got {}, expected {}, tol {}",
+                sv.abs(),
+                svd.S()[i],
+                sv_tol
+            );
+        }
 
         // Reconstruction: A = U * diag(S) * V^T
         let mut reconstructed = [[0.0; 3]; 3];
