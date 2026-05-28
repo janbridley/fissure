@@ -1,40 +1,25 @@
-/*! Faithful ports of Lapack's `lasv2` subroutines with Rust generic types.
+/*! Faithful port of LAPACK's `lasv2` subroutine with Rust generic types.
 
 Given the elements `f`, `g`, and `h` of an upper-triangular matrix:
 ```text
 [ f  g ]
 [ 0  h ]
 ```
-This crate returns data corresponding with the singular values and vectors of that
-matrix. As in lapack, singular values are not guaranteed to be positive, although we do
-guarantee that `σ_max.abs() >= σ_min.abs()`.
+[`lasv2`] computes the singular values and vectors of that matrix. As in LAPACK,
+singular values are not guaranteed to be positive, although we do guarantee that
+`σ_max.abs() >= σ_min.abs()`.
 
-[`lasv2`] provides a matching interface to the original Fortran source code, although it
-is recommented to use [`svd2_tri`] which offers a more ergonomic signature. Both
-functions operate on `T: num_traits::Float`, which is automatically implemented for
-`f32` and `f64` and can be implemented for custom types as desired. While the code
+This function operates on `T: num_traits::Float`, which is automatically implemented
+for `f32` and `f64` and can be implemented for custom types as desired. While the code
 guarantees accuracy up to a few units in last place for `f32` and `f64`, no guarantees
 are made for alternative types that do not share behavior with IEEE floats.
-
-
-# Example
-```rust
-use lasv2::svd2_tri;
-let (u, (smax, smin), v) = svd2_tri(1.0, 0.0, 1.0);
-assert_eq!((smax, smin), (1.0, 1.0));
-
-assert_eq!(u, [[1.0, 0.0], [0.0, 1.0]]);
-assert_eq!(v, [[1.0, 0.0], [0.0, 1.0]]);
-```
 
 */
 use num_traits::Float;
 
 /** Computes the singular value decomposition of a 2-by-2 triangular matrix.
 
-
-This method implements the same function signature as LAPACK. The [`svd2_tri`] function
-provides a more intuitive interface for the same decomposition.
+This method implements the same function signature as LAPACK.
 */
 #[expect(clippy::too_many_arguments)]
 pub fn lasv2<T: Float>(
@@ -147,63 +132,6 @@ pub fn lasv2<T: Float>(
     *ssmin = ssmin.copysign(tsign * f.signum() * h.signum());
 }
 
-/// A Stack allocated 2x2 matrix of type T.
-pub type Mat22<T> = [[T; 2]; 2];
-
-/// Computes the singular value decomposition of a 2-by-2 triangular matrix.
-///
-/// Given the elements `f`, `g`, and `h` of an upper-triangular matrix:
-///
-/// ```text
-/// [ f  g ]
-/// [ 0  h ]
-/// ```
-///
-/// This function returns a tuple `(U, S, V)` where:
-/// - `U` is a 2×2 orthogonal matrix (left singular vectors),
-/// - `S` is a tuple `(σ_max, σ_min)` of singular values in descending order,
-/// - `V` is a 2×2 orthogonal matrix (right singular vectors).
-///
-/// # Type Parameters
-/// - `T`: A floating-point type that implements the [`Float`] trait.
-///
-/// # Parameters
-/// - `f`: Top-left element of the triangular matrix.
-/// - `g`: Top-right element of the triangular matrix.
-/// - `h`: Bottom-right element of the triangular matrix.
-///
-/// # Returns
-/// `(U, (σ_max, σ_min), V)`
-///
-/// # Example
-/// ```rust
-/// use lasv2::svd2_tri;
-/// let (u, (smax, smin), v) = svd2_tri(1.0, 0.0, 1.0);
-/// assert_eq!((smax, smin), (1.0, 1.0));
-///
-/// assert_eq!(u, [[1.0, 0.0], [0.0, 1.0]]);
-/// assert_eq!(v, [[1.0, 0.0], [0.0, 1.0]]);
-/// ```
-pub fn svd2_tri<T: Float>(f: T, g: T, h: T) -> (Mat22<T>, (T, T), Mat22<T>) {
-    let (mut ssmin, mut ssmax, mut snr, mut csr, mut snl, mut csl) = (
-        T::zero(),
-        T::zero(),
-        T::zero(),
-        T::zero(),
-        T::zero(),
-        T::zero(),
-    );
-    lasv2(
-        &f, &g, &h, &mut ssmin, &mut ssmax, &mut snr, &mut csr, &mut snl, &mut csl,
-    );
-
-    (
-        [[csl, -snl], [snl, csl]],
-        (ssmax, ssmin),
-        [[csr, -snr], [snr, csr]],
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -256,61 +184,6 @@ mod tests {
         assert_ulps_eq!(reconstructed[(0, 1)], g, max_ulps = 10);
         let max_in = f64::max(f, f64::max(g, h));
         let min_in = f64::min(f, f64::min(g, h));
-        assert_ulps_eq!(
-            reconstructed[(1, 0)].abs(),
-            0.0,
-            epsilon = f64::max((max_in - min_in).abs(), 1.0) * f64::EPSILON * 4.0
-        );
-        assert_ulps_eq!(reconstructed[(1, 1)], h, max_ulps = 10);
-    }
-
-    #[rstest]
-    #[case::eye((1.0, 0.0, 1.0))]
-    #[case::eye_neg((-1.0, 0.0, -1.0))]
-    #[case::topright((0.0, 5.0, 0.0))]
-    #[case::diagonal((3.0, 0.0, 4.0))]
-    #[case::standard((-2.0, 5.0, -3.0))]
-    #[case::zero((0.0, 0.0, 0.0))]
-    #[case::degenerate((LARGE_F64, 1e8, SMALL_F64))]
-    #[case::nilpotent_g((0.0, 5.0, 0.0))]
-    #[case::nilpotent_f((5.0, 0.0, 0.0))]
-    #[case::nilpotent_h((0.0, 0.0, 5.0))]
-    #[case::all_tiny_positive((SMALL_F64, SMALL_F64, SMALL_F64))]
-    #[case::all_tiny_negative((-SMALL_F64, -SMALL_F64, -SMALL_F64))]
-    #[case::large_mixed_signs((LARGE_F64, -LARGE_F64, LARGE_F64))]
-    #[case::large_opposite_signs((-LARGE_F64, LARGE_F64, -LARGE_F64))]
-    fn test_svd2_tri_param(#[case] (f, g, h): (f64, f64, f64)) {
-        let (u, (ssmax, ssmin), v) = svd2_tri(f, g, h);
-
-        assert!(ssmax.abs() >= ssmin);
-        assert!((ssmin <= 0.0 && ssmax <= 0.0) || ssmin >= 0.0);
-
-        let svd = faer::mat![[f, g], [0.0, h]].svd().unwrap();
-        assert_ulps_eq!(ssmin.abs(), svd.S()[1], max_ulps = 10);
-        assert_ulps_eq!(ssmax.abs(), svd.S()[0], max_ulps = 10);
-
-        // Make sure we're orthogonal
-        let u_norm = u[0][0] * u[0][0] + u[1][0] * u[1][0];
-        let v_norm = v[0][0] * v[0][0] + v[1][0] * v[1][0];
-        assert_ulps_eq!(u_norm, 1.0, max_ulps = 4);
-        assert_ulps_eq!(v_norm, 1.0, max_ulps = 4);
-
-        // Reconstruct original matrix
-        let u = faer::mat![[u[0][0], u[0][1]], [u[1][0], u[1][1]]];
-        let v = faer::mat![[v[0][0], v[0][1]], [v[1][0], v[1][1]]];
-        let s = faer::mat![[ssmax, 0.0], [0.0, ssmin]];
-
-        let reconstructed = u * s * v.transpose();
-
-        println!("orig: {:?}", [[f, g], [0.0, h]]);
-        println!("reco: {reconstructed:?}");
-
-        assert_ulps_eq!(reconstructed[(0, 0)], f, max_ulps = 10);
-        assert_ulps_eq!(reconstructed[(0, 1)], g, max_ulps = 10);
-
-        let max_in = f64::max(f, f64::max(g, h));
-        let min_in = f64::min(f, f64::min(g, h));
-        println!("{}", (max_in - min_in).abs() * f64::EPSILON * 4.0);
         assert_ulps_eq!(
             reconstructed[(1, 0)].abs(),
             0.0,
