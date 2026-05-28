@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2024"
 license-file = "../LICENSE"
 description = "Faithful port of LAPACK's LASV2 subroutine."
+repository = "https://github.com/janbridley/fissure"
+keywords = ["linear-algebra", "svd", "lapack"]
+categories = ["mathematics", "science"]
 
 [dependencies]
 num-traits = "0.2.19"

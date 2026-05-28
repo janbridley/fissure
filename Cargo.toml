@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2024"
 license-file = "LICENSE"
 description = "Performant and numerically robust matrix decompositions of small matrices."
+repository = "https://github.com/janbridley/fissure"
+keywords = ["linear-algebra", "matrix-decomposition", "svd", "lapack"]
+categories = ["mathematics", "science"]
 
 [dependencies]
 lasv2 = { path = "lasv2" }
@@ -29,6 +32,7 @@ cargo = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 
 multiple_crate_versions = "allow"
+many_single_char_names = "allow"
 cast_precision_loss = "allow"
 float_cmp = "allow"
 similar_names = "allow"

@@ -1,3 +1,19 @@
+/*!
+Performant and numerically robust matrix decompositions of small matrices.
+
+### lasv2
+
+Faithful port of LAPACK's `DLASV2` / `SLASV2` for the singular value decomposition of
+2×2 upper-triangular matrices. Works with any `T: num_traits::Float` (`f32`, `f64`,
+SIMD, or custom float types).
+
+- **[`lasv2::lasv2`]** — matches the original LAPACK signature (mutable out-params).
+
+### fissure
+
+- **[`svd2`]** — SVD of a general 2×2 matrix, accepts `[[T; 2]; 2]` row-major input.
+
+*/
 use lasv2::lasv2;
 use num_traits::Float;
 
@@ -19,6 +35,7 @@ pub type Mat2<T> = [[T; 2]; 2];
 /// let (u, (smax, smin), v) = svd2([[1.0_f64, 2.0], [3.0, 4.0]]);
 /// assert!(smax.abs() >= smin.abs());
 /// ```
+#[inline]
 pub fn svd2<T: Float>(m: Mat2<T>) -> (Mat2<T>, (T, T), Mat2<T>) {
     let (a, b, c, d) = (m[0][0], m[0][1], m[1][0], m[1][1]);
 

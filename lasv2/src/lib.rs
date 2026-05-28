@@ -21,7 +21,8 @@ use num_traits::Float;
 
 This method implements the same function signature as LAPACK.
 */
-#[expect(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments, reason = "matches LAPACK signature")]
+#[inline]
 pub fn lasv2<T: Float>(
     f: &T,
     g: &T,
@@ -70,10 +71,11 @@ pub fn lasv2<T: Float>(
                 // Absolute value of g is very large.
                 ga_small = false;
                 *ssmax = ga;
-                match ha > T::one() {
-                    true => *ssmin = fa / (ga / ha),
-                    false => *ssmin = (fa / ga) * ha,
-                };
+                if ha > T::one() {
+                    *ssmin = fa / (ga / ha);
+                } else {
+                    *ssmin = (fa / ga) * ha;
+                }
                 (clt, srt) = (T::one(), T::one());
                 slt = ht / gt;
                 crt = ft / gt;
@@ -82,9 +84,10 @@ pub fn lasv2<T: Float>(
         if ga_small {
             // Normal case
             let d = fa - ha;
-            let mut l = match d == fa {
-                true => T::one(), // Handle infinite F or H
-                false => d / fa,
+            let mut l = if d == fa {
+                T::one() // Handle infinite F or H
+            } else {
+                d / fa
             }; // Note that 0.0 <= l <= 1.0
             let m = gt / ft; // Note that abs(m) <= 1/ε
             let mm = m * m;
@@ -92,9 +95,10 @@ pub fn lasv2<T: Float>(
             let mut t = two - l; // T >= 1.0
 
             let s = (mm + t * t).sqrt(); // 1 <= s <= 1 + 1/ε
-            let r = match l == T::zero() {
-                true => m.abs(),
-                false => (mm + l * l).sqrt(),
+            let r = if l == T::zero() {
+                m.abs()
+            } else {
+                (mm + l * l).sqrt()
             }; // 0 <= r <= 1 + 1/ε
 
             let a = (s + r) / two; // 1 <= a <= 1 + abs(m);
